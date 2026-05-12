@@ -341,7 +341,8 @@ function gc(g){
 
 // ── STATE ──
 let allData=[...EMBEDDED_DATA];
-let ratings=JSON.parse(localStorage.getItem('hdb_r')||'{}');
+let ratings={};
+const SCRIPT_URL='https://script.google.com/macros/s/AKfycbz7ukvi2HbqC21KrgK3Ba6I0Y7fI4EQeHFZqpBl1IQwcpBs8fAl5EMKbfBdQxwB_nA/exec';
 let clickLL=null, radKm=50, selEntry=null, curStars=0;
 let sortCol='firma', sortDir=1;
 let circleL=null, pinL=null, mkLayers=[];
@@ -480,16 +481,29 @@ document.querySelectorAll('.sbtn').forEach(b=>{
   b.addEventListener('mouseleave',()=>{updStars();document.querySelectorAll('.sbtn').forEach(x=>x.style.color='');});
 });
 function updStars(){document.querySelectorAll('.sbtn').forEach(b=>b.classList.toggle('lit',+b.dataset.v<=curStars));}
-function saveRating(){
+async function saveRating(){
   if(!selEntry){return;}
   if(!curStars){toast('Bitte Sterne wählen','err');return;}
   const id=selEntry.firma+'__'+selEntry.plz;
   const cmt=document.getElementById('rtaTa').value.trim();
+  const entry={stars:curStars,comment:cmt,date:new Date().toLocaleDateString('de-DE')};
+  // Lokal sofort anzeigen
   if(!ratings[id]) ratings[id]=[];
-  ratings[id].push({stars:curStars,comment:cmt,date:new Date().toLocaleDateString('de-DE')});
-  localStorage.setItem('hdb_r',JSON.stringify(ratings));
+  ratings[id].push(entry);
   curStars=0;updStars();document.getElementById('rtaTa').value='';
-  renderPrev(id);toast('⭐ Bewertung gespeichert!','ok');
+  renderPrev(id);
+  // In Google Sheets speichern
+  toast('⏳ Speichere...','ok');
+  try{
+    await fetch(SCRIPT_URL,{
+      method:'POST',
+      body:JSON.stringify({id,stars:entry.stars,comment:entry.comment,date:entry.date}),
+    });
+    toast('⭐ Bewertung gespeichert!','ok');
+  } catch{
+    toast('⚠ Offline – Bewertung nur lokal gespeichert','err');
+  }
+  refreshMap();renderTbl();
 }
 function getAvg(id){const r=ratings[id];if(!r?.length) return 0;return r.reduce((a,b)=>a+b.stars,0)/r.length;}
 function renderPrev(id){
@@ -534,6 +548,7 @@ async function syncSheet(){
   setTimeout(()=>document.getElementById('loadbar').style.width='0',500);
   setSyn('ok',`${allData.length} Einträge`);
   buildGW();refreshMap();renderTbl();
+  loadRatings();
 }
 
 function parseCSVSheet(text){
@@ -658,8 +673,28 @@ function toast(msg,type='ok'){
 
 // ── INIT ──
 buildGW();
-setSyn('ok',allData.length+' Einträge');
 renderTbl();
+// Bewertungen von Google Sheets laden
+async function loadRatings(){
+  setSyn('spin','Lade Bewertungen...');
+  try{
+    const res=await fetch(SCRIPT_URL);
+    const data=await res.json();
+    ratings={};
+    data.slice(1).forEach(row=>{
+      const [id,stars,comment,date]=row;
+      if(!id) return;
+      if(!ratings[id]) ratings[id]=[];
+      ratings[id].push({stars:+stars,comment:comment||'',date:date||''});
+    });
+    setSyn('ok',allData.length+' Einträge');
+    toast('✓ Bewertungen geladen','ok');
+  } catch{
+    setSyn('ok',allData.length+' Einträge (Bewertungen offline)');
+  }
+  refreshMap();renderTbl();
+}
+loadRatings();
 </script>
 </body>
 </html>
